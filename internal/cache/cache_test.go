@@ -4,10 +4,11 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestCache_SetGetDelete(t *testing.T) {
-	c := New()
+	c := New(1 * time.Second)
 	key := "key"
 	value := "value"
 
@@ -16,7 +17,7 @@ func TestCache_SetGetDelete(t *testing.T) {
 		t.Errorf("got error %v, want %v", err, ErrNotFound)
 	}
 
-	err = c.Set(key, value)
+	err = c.Set(key, value, 0)
 	if err != nil {
 		t.Errorf("got error %v, want %v", err, nil)
 	}
@@ -42,7 +43,7 @@ func TestCache_SetGetDelete(t *testing.T) {
 }
 
 func TestCache_Concurrency(t *testing.T) {
-	c := New()
+	c := New(10 * time.Second)
 	numGoroutines := 100
 	iterationsPerGoroutine := 100
 
@@ -57,7 +58,7 @@ func TestCache_Concurrency(t *testing.T) {
 			value := "value"
 
 			for j := 0; j < iterationsPerGoroutine; j++ {
-				err := c.Set(key, value)
+				err := c.Set(key, value, -1)
 				if err != nil {
 					t.Errorf("unexpected error on Set: %v", err)
 				}
@@ -82,4 +83,27 @@ func TestCache_Concurrency(t *testing.T) {
 
 	// Assert: Ждем завершения всех горутин.
 	wg.Wait()
+}
+
+func TestCache_TTL(t *testing.T) {
+	c := New(1 * time.Second)
+	key := "key"
+	value := "value"
+	err := c.Set(key, value, 50*time.Millisecond)
+	if err != nil {
+		t.Errorf("got error %v, want %v", err, nil)
+	}
+	val, err := c.Get(key)
+	if err != nil {
+		t.Errorf("got error %v, want %v", err, nil)
+	}
+	if val != value {
+		t.Errorf("got %v, want %v", val, value)
+	}
+	time.Sleep(50 * time.Millisecond)
+	val, err = c.Get(key)
+
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("got error %v, want %v", err, ErrNotFound)
+	}
 }
