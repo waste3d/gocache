@@ -17,16 +17,16 @@ type item struct {
 	Value interface{}
 }
 
-type memoryCache struct {
+type inMemoryCache struct {
 	mu    sync.RWMutex
 	items map[string]*item
 }
 
 func New() Cache {
-	return &memoryCache{items: make(map[string]*item)}
+	return &inMemoryCache{items: make(map[string]*item)}
 }
 
-func (m *memoryCache) Get(key string) (interface{}, error) {
+func (m *inMemoryCache) Get(key string) (interface{}, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -38,7 +38,7 @@ func (m *memoryCache) Get(key string) (interface{}, error) {
 	return item.Value, nil
 }
 
-func (m *memoryCache) Set(key string, value interface{}) error {
+func (m *inMemoryCache) Set(key string, value interface{}) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -46,7 +46,7 @@ func (m *memoryCache) Set(key string, value interface{}) error {
 	return nil
 }
 
-func (m *memoryCache) Delete(key string) error {
+func (m *inMemoryCache) Delete(key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
