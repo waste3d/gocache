@@ -59,12 +59,15 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}()
 
 	scanner := bufio.NewScanner(conn)
+
+ScannerLoop:
 	for scanner.Scan() {
 		line := scanner.Text()
 
 		parts := strings.Fields(line)
 		if len(parts) == 0 {
 			fmt.Println("Empty line")
+			continue
 		}
 
 		command := strings.ToUpper(parts[0])
@@ -117,12 +120,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 				io.WriteString(conn, "1\n") // Ключ был и удален
 			}
 		case "CLEAR":
-		case "EXIT":
 			if len(parts) != 1 {
-				fmt.Println
+				fmt.Fprintf(conn, "ERROR: 'CLEAR' command takes no arguments\n")
+				continue
 			}
-			
-
+			io.WriteString(conn, "\x1b[2J\x1b[H\u001B[2J\u001B[H")
+		case "EXIT":
+			break ScannerLoop
 		default:
 			fmt.Fprintf(conn, "ERROR: unknown command '%s'\n", command)
 		}
