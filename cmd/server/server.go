@@ -69,8 +69,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 		command := strings.ToUpper(parts[0])
 
-		if len(parts) < 2 {
-			fmt.Println("Not enough parts (min 2)")
+		if len(parts) < 1 {
+			fmt.Println("Not enough parts (min 1)")
 		}
 
 		switch command {
@@ -116,6 +116,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 				s.cache.Delete(key)
 				io.WriteString(conn, "1\n") // Ключ был и удален
 			}
+		case "CLEAR":
+		case "EXIT":
+			if len(parts) != 1 {
+				fmt.Println
+			}
+			
+
 		default:
 			fmt.Fprintf(conn, "ERROR: unknown command '%s'\n", command)
 		}
