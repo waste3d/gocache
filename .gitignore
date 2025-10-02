@@ -1,0 +1,4 @@
+dump.*
+.env
+config.*
+*.config.*

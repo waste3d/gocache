@@ -1,7 +1,9 @@
 package cache
 
 import (
+	"encoding/gob"
 	"errors"
+	"os"
 	"sync"
 	"time"
 )
@@ -12,6 +14,8 @@ type Cache interface {
 	Get(key string) (interface{}, error)
 	Set(key string, value interface{}, ttl time.Duration) error
 	Delete(key string) error
+	SaveToFile(path string) error
+	LoadFromFile(path string) error
 	Stop()
 }
 
@@ -108,5 +112,48 @@ func (m *inMemoryCache) Delete(key string) error {
 	defer m.mu.Unlock()
 
 	delete(m.items, key)
+	return nil
+}
+
+func (m *inMemoryCache) SaveToFile(path string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	coder := gob.NewEncoder(file)
+	err = coder.Encode(m.items)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *inMemoryCache) LoadFromFile(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	decoder := gob.NewDecoder(file)
+
+	var items map[string]*item
+
+	err = decoder.Decode(&items)
+	if err != nil {
+		return err
+	}
+
+	m.items = items
+
 	return nil
 }
