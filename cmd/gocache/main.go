@@ -16,7 +16,7 @@ func main() {
 
 	log.Println("Starting GoCache server...")
 
-	c := cache.New(10 * time.Second)
+	c := cache.New(10*time.Second, 5)
 
 	if err := c.LoadFromFile("dump.goc"); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
