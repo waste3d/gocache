@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"gocache/internal/cache"
 	"io"
@@ -41,9 +42,12 @@ func (s *Server) Start() error {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				log.Println("Accept loop gracefully stopped.")
+				return nil
+			}
 			return err
 		}
-
 		s.wg.Add(1)
 		go s.handleConnection(conn)
 	}
