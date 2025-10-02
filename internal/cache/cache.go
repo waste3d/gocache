@@ -2,7 +2,6 @@ package cache
 
 import (
 	"errors"
-	"hash"
 	"hash/fnv"
 	_ "hash/fnv"
 	"sync"
@@ -30,7 +29,6 @@ type cacheShard struct {
 type ShardedCache struct {
 	shards     []*cacheShard
 	shardCount uint32
-	hash       hash.Hash32
 }
 
 type item struct {
@@ -43,24 +41,33 @@ func NewShardedCache(shardCount uint32) *ShardedCache {
 	sc := &ShardedCache{
 		shards:     make([]*cacheShard, shardCount),
 		shardCount: shardCount,
-		hash:       fnv.New32a(),
 	}
 
 	for i := 0; i < int(shardCount); i++ {
 		sc.shards[i] = &cacheShard{
 			items: make(map[string]*item),
+			mu:    new(sync.Mutex),
 		}
 	}
 	return sc
 }
 
+// fnv.New32a() очень легковесен и создается моментально в каждой горутине, засчет этого можно не передавать hash и mutex
 func (s *ShardedCache) getShard(key string) *cacheShard {
-	s.hash.Write([]byte(key))
-	hashKey := s.hash.Sum32()
-	s.hash.Reset()
+	hasher := fnv.New32a()
+	hasher.Write([]byte(key))
+	hash := hasher.Sum32()
 
-	shardIndex := hashKey % s.shardCount
-	return s.shards[shardIndex]
+	sharedIndex := hash % s.shardCount
+	return s.shards[sharedIndex]
 }
 
-// test
+func (s *ShardedCache) Set(key string, value interface{}, ttl time.Duration) error {
+	shard := s.getShard(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	shard.items[key] = &item{Value: value, Expiration: time.Now().Add(ttl).Unix()}
+
+	return nil
+}
