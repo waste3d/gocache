@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 const defaultShardCount = 32
@@ -17,7 +18,7 @@ func main() {
 
 	log.Println("Starting GoCache server...")
 
-	c := cache.NewShardedCache(defaultShardCount)
+	c := cache.NewShardedCache(defaultShardCount, 1000, 10*time.Second)
 
 	if err := c.LoadFromFile("dump.goc"); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
