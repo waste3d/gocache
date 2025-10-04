@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-const defaultShardCount = 32
-
 var ErrNotFound = errors.New("key not found")
 
 type Cache interface {
@@ -22,7 +20,7 @@ type Cache interface {
 }
 
 type cacheShard struct {
-	mu    *sync.Mutex
+	mu    *sync.RWMutex
 	items map[string]*item
 }
 
@@ -46,7 +44,7 @@ func NewShardedCache(shardCount uint32) *ShardedCache {
 	for i := 0; i < int(shardCount); i++ {
 		sc.shards[i] = &cacheShard{
 			items: make(map[string]*item),
-			mu:    new(sync.Mutex),
+			mu:    new(sync.RWMutex),
 		}
 	}
 	return sc
@@ -70,4 +68,41 @@ func (s *ShardedCache) Set(key string, value interface{}, ttl time.Duration) err
 	shard.items[key] = &item{Value: value, Expiration: time.Now().Add(ttl).Unix()}
 
 	return nil
+}
+
+func (s *ShardedCache) Get(key string) (interface{}, error) {
+	shard := s.getShard(key)
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+
+	item, ok := shard.items[key]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return item.Value, nil
+}
+
+func (s *ShardedCache) Delete(key string) error {
+	shard := s.getShard(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	_, ok := shard.items[key]
+	if !ok {
+		return ErrNotFound
+	}
+	delete(shard.items, key)
+
+	return nil
+}
+
+func (s *ShardedCache) SaveToFile(path string) error {
+	return nil
+}
+
+func (s *ShardedCache) LoadFromFile(path string) error {
+	return nil
+}
+
+func (s *ShardedCache) Stop() {
+
 }
