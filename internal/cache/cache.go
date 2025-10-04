@@ -41,7 +41,7 @@ type item struct {
 	Expiration int64
 }
 
-func NewShardedCache(shardCount uint32, totalMaxSize int, clenupInterval time.Duration) *ShardedCache {
+func NewShardedCache(shardCount uint32, totalMaxSize int, cleanupInterval time.Duration) *ShardedCache {
 	sc := &ShardedCache{
 		shards:     make([]*cacheShard, shardCount),
 		shardCount: shardCount,
@@ -64,7 +64,9 @@ func NewShardedCache(shardCount uint32, totalMaxSize int, clenupInterval time.Du
 			stopCh:  make(chan struct{}),
 		}
 
-		go sc.shards[i].cleanupLoop(clenupInterval)
+		if cleanupInterval > 0 {
+			go sc.shards[i].cleanupLoop(cleanupInterval)
+		}
 	}
 
 	return sc
@@ -257,7 +259,7 @@ func (sc *ShardedCache) LoadFromFile(path string) error {
 
 		elem := shard.ll.PushFront(it)
 		shard.items[key] = elem
-		
+
 		shard.mu.Unlock()
 	}
 
