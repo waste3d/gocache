@@ -78,3 +78,58 @@ func TestSharedCache_Persistence(t *testing.T) {
 		}
 	}
 }
+
+func TestShardedCache_IncrDecr(t *testing.T) {
+	// Arrange
+	shardedCache := cache.NewShardedCache(4, 100, 0)
+
+	// Act 1 - incr
+	val, err := shardedCache.Incr("A")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert 1
+	if val != 1 {
+		t.Fatalf("incr returned wrong value, expected 1, got %d", val)
+	}
+
+	val, err = shardedCache.Incr("A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val != 2 {
+		t.Fatalf("incr returned wrong value, expected 2, got %d", val)
+	}
+
+	// Act 2 - decr
+	val, err = shardedCache.Decr("B")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert 2
+	if val != -1 {
+		t.Fatalf("incr returned wrong value, expected -1, got %d", val)
+	}
+
+	val, err = shardedCache.Decr("B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val != -2 {
+		t.Fatalf("incr returned wrong value, expected 1, got %d", val)
+	}
+
+	// Act 3
+	shardedCache.Set("string_key", "string_value", 0)
+	_, err = shardedCache.Incr("string_key")
+	if err == nil {
+		t.Fatal("should have errored")
+	}
+
+	_, err = shardedCache.Decr("string_key")
+	if err == nil {
+		t.Fatal("should have errored")
+	}
+}
