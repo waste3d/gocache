@@ -19,6 +19,8 @@ type Cache interface {
 	Delete(key string) error
 	SaveToFile(path string) error
 	LoadFromFile(path string) error
+	Incr(key string) (int64, error)
+	Decr(key string) (int64, error)
 	Stop()
 }
 
@@ -111,6 +113,52 @@ func (c *cacheShard) deleteExpired() {
 	}
 }
 
+func (c *cacheShard) incr(key string, delta int64) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	elem, ok := c.items[key]
+	if ok {
+		c.ll.MoveToFront(elem)
+		it := elem.Value.(*item)
+
+		var newValue int64
+		switch v := it.Value.(type) {
+		case int64:
+			newValue = int64(v) + delta
+			it.Value = newValue
+		case int:
+			newValue = int64(v) + delta
+			it.Value = newValue
+		case int32:
+			newValue = int64(v) + delta
+			it.Value = newValue
+		case string:
+			return 0, errors.New("value is not an integer")
+		default:
+			return 0, errors.New("value is not a supported number type")
+		}
+
+		return newValue, nil
+
+	} else {
+		it := &item{Key: key, Value: delta, Expiration: 0}
+		elem := c.ll.PushFront(it)
+
+		c.items[key] = elem
+
+		if c.maxSize > 0 && c.ll.Len() > c.maxSize {
+			lruElement := c.ll.Back()
+			if lruElement != nil {
+				c.ll.Remove(lruElement)
+				lruItem := lruElement.Value.(*item)
+				delete(c.items, lruItem.Key)
+			}
+		}
+		return delta, nil
+	}
+}
+
 func (c *cacheShard) set(key string, value interface{}, expiration int64) error {
 
 	c.mu.Lock()
@@ -173,6 +221,16 @@ func (c *cacheShard) delete(key string) error {
 	}
 
 	return nil
+}
+
+func (sc *ShardedCache) Incr(key string) (int64, error) {
+	shard := sc.getShard(key)
+	return shard.incr(key, 1)
+}
+
+func (sc *ShardedCache) Decr(key string) (int64, error) {
+	shard := sc.getShard(key)
+	return shard.incr(key, -1)
 }
 
 // fnv.New32a() очень легковесен и создается моментально в каждой горутине, засчет этого можно не передавать hash и mutex

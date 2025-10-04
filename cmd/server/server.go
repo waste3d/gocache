@@ -55,93 +55,125 @@ func (s *Server) Start() error {
 
 func (s *Server) handleConnection(conn net.Conn) {
 	defer s.wg.Done()
-	defer func() {
-		err := conn.Close()
-		if err != nil {
-			log.Printf("Error closing connection: %v", err)
-		}
-	}()
+	defer conn.Close()
 
 	scanner := bufio.NewScanner(conn)
 
 ConnectionLoop:
 	for scanner.Scan() {
-		line := scanner.Text()
-
-		parts := strings.Fields(line)
+		parts := strings.Fields(scanner.Text())
 		if len(parts) == 0 {
-			fmt.Println("Empty line")
 			continue
 		}
 
 		command := strings.ToUpper(parts[0])
 
-		if len(parts) < 1 {
-			fmt.Println("Not enough parts (min 1)")
-		}
-
 		switch command {
 		case "GET":
-			value, err := s.cache.Get(parts[1])
+			if len(parts) != 2 {
+				fmt.Fprintf(conn, "ERROR: wrong number of arguments for 'GET'\n")
+				continue
+			}
+			key := parts[1]
+			value, err := s.cache.Get(key)
 			if err != nil {
 				io.WriteString(conn, "(nil)\n")
 			} else {
 				fmt.Fprintf(conn, "%v\n", value)
 			}
+
 		case "SET":
 			if len(parts) < 3 {
-				fmt.Println("Not enough parts (min 3)")
+				fmt.Fprintf(conn, "ERROR: wrong number of arguments for 'SET'\n")
 				continue
 			}
-
 			key := parts[1]
-			value := parts[2]
+			valueStr := parts[2]
 			var ttl time.Duration = 0
+
+			var valueToStore interface{}
+			intValue, err := strconv.ParseInt(valueStr, 10, 64)
+			if err == nil {
+				valueToStore = intValue
+			} else {
+				valueToStore = valueStr
+			}
 
 			if len(parts) == 4 {
 				ttlInSeconds, err := strconv.ParseInt(parts[3], 10, 64)
 				if err != nil {
-					log.Printf("Error parsing TTL: %v", err)
+					fmt.Fprintf(conn, "ERROR: TTL must be an integer\n")
+					continue
 				}
 				ttl = time.Duration(ttlInSeconds) * time.Second
 			}
-			if err := s.cache.Set(key, value, ttl); err != nil {
-				log.Printf("Error setting value: %v", err)
+
+			// Передаем в кэш значение правильного типа
+			if err := s.cache.Set(key, valueToStore, ttl); err != nil {
+				fmt.Fprintf(conn, "ERROR: %v\n", err)
 			} else {
-				fmt.Println("Set OK")
+				io.WriteString(conn, "OK\n")
 			}
-		case "DEL":
+		case "DELETE":
 			if len(parts) != 2 {
-				fmt.Fprintf(conn, "ERROR: wrong number of arguments for '%s' command\n", parts[0])
+				fmt.Fprintf(conn, "ERROR: wrong number of arguments for 'DELETE'\n")
 				continue
 			}
 			key := parts[1]
+			// Метод Delete ничего не возвращает, поэтому сначала проверяем наличие
 			_, err := s.cache.Get(key)
+			s.cache.Delete(key)
 			if err != nil {
-				io.WriteString(conn, "Key not found\n") // Ключа не было
+				io.WriteString(conn, "0\n") // Не было ключа
 			} else {
-				s.cache.Delete(key)
-				io.WriteString(conn, "Deleted successfully\n") // Ключ был и удален
+				io.WriteString(conn, "1\n") // Ключ был
 			}
+
+		case "INCR":
+			if len(parts) != 2 {
+				fmt.Fprintf(conn, "ERROR: wrong number of arguments for 'INCR'\n")
+				continue
+			}
+			key := parts[1]
+			newValue, err := s.cache.Incr(key)
+			if err != nil {
+				fmt.Fprintf(conn, "ERROR: %v\n", err)
+			} else {
+				fmt.Fprintf(conn, "%d\n", newValue) // Используем Fprintf для добавления \n
+			}
+
+		case "DECR":
+			if len(parts) != 2 {
+				fmt.Fprintf(conn, "ERROR: wrong number of arguments for 'DECR'\n")
+				continue // <-- БЫЛА ОШИБКА
+			}
+			key := parts[1]
+			newValue, err := s.cache.Decr(key)
+			if err != nil {
+				fmt.Fprintf(conn, "ERROR: %v\n", err)
+			} else {
+				fmt.Fprintf(conn, "%d\n", newValue)
+			}
+
 		case "CLEAR":
 			if len(parts) != 1 {
 				fmt.Fprintf(conn, "ERROR: 'CLEAR' command takes no arguments\n")
 				continue
 			}
-			io.WriteString(conn, "\x1b[2J\x1b[H\u001B[2J\u001B[H") // Очищаем строку
-		case "EXIT":
-			break ConnectionLoop // Выходим из цикла
+			io.WriteString(conn, "\x1b[2J\x1b[H")
+
+		case "EXIT", "QUIT":
+			break ConnectionLoop
+
 		default:
 			fmt.Fprintf(conn, "ERROR: unknown command '%s'\n", command)
 		}
-
-		if err := scanner.Err(); err != nil {
-			fmt.Fprintf(conn, "ERROR: %v\n", err)
-		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		log.Printf("Error reading from connection: %v", err)
+	}
 }
-
 func (s *Server) Stop() {
 	log.Println("Stopping server...")
 	if s.listener != nil {
