@@ -2,9 +2,11 @@ package cache
 
 import (
 	"container/list"
+	"encoding/gob"
 	"errors"
 	"hash/fnv"
 	_ "hash/fnv"
+	"os"
 	"sync"
 	"time"
 )
@@ -112,20 +114,17 @@ func (c *cacheShard) set(key string, value interface{}, expiration int64) error 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Сценарий 1: Обновление
 	if elem, ok := c.items[key]; ok {
 		c.ll.MoveToFront(elem)
 		it := elem.Value.(*item)
 		it.Value = value
 		it.Expiration = expiration
 	} else {
-		// Сценарий 2: Добавление
 		it := &item{Key: key, Value: value, Expiration: expiration}
 		elem := c.ll.PushFront(it)
 		c.items[key] = elem
 	}
 
-	// Проверка и вытеснение (сразу после добавления)
 	if c.maxSize > 0 && c.ll.Len() > c.maxSize {
 		lruElement := c.ll.Back()
 		if lruElement != nil {
@@ -145,14 +144,12 @@ func (c *cacheShard) get(key string) (interface{}, error) {
 	if elem, ok := c.items[key]; ok {
 		it := elem.Value.(*item)
 
-		// Пассивное вытеснение по TTL
 		if it.Expiration > 0 && time.Now().UnixNano() > it.Expiration {
 			c.ll.Remove(elem)
 			delete(c.items, key)
 			return nil, ErrNotFound
 		}
 
-		// Обновление LRU
 		c.ll.MoveToFront(elem)
 		return it.Value, nil
 	}
@@ -177,45 +174,92 @@ func (c *cacheShard) delete(key string) error {
 }
 
 // fnv.New32a() очень легковесен и создается моментально в каждой горутине, засчет этого можно не передавать hash и mutex
-func (s *ShardedCache) getShard(key string) *cacheShard {
+func (sc *ShardedCache) getShard(key string) *cacheShard {
 	hasher := fnv.New32a()
 	hasher.Write([]byte(key))
 	hash := hasher.Sum32()
 
-	sharedIndex := hash % s.shardCount
-	return s.shards[sharedIndex]
+	sharedIndex := hash % sc.shardCount
+	return sc.shards[sharedIndex]
 }
 
-func (s *ShardedCache) Set(key string, value interface{}, ttl time.Duration) error {
+func (sc *ShardedCache) Set(key string, value interface{}, ttl time.Duration) error {
 	var expiration int64
 	if ttl > 0 {
 		expiration = time.Now().Add(ttl).UnixNano()
 	}
 
-	shard := s.getShard(key)
+	shard := sc.getShard(key)
 	return shard.set(key, value, expiration)
 }
 
-func (s *ShardedCache) Get(key string) (interface{}, error) {
-	shard := s.getShard(key)
+func (sc *ShardedCache) Get(key string) (interface{}, error) {
+	shard := sc.getShard(key)
 	return shard.get(key)
 }
 
-func (s *ShardedCache) Delete(key string) error {
-	shard := s.getShard(key)
+func (sc *ShardedCache) Delete(key string) error {
+	shard := sc.getShard(key)
 	return shard.delete(key)
 }
 
-func (s *ShardedCache) Stop() {
-	for _, shard := range s.shards {
+func (sc *ShardedCache) Stop() {
+	for _, shard := range sc.shards {
 		shard.stop()
 	}
 }
 
-func (s *ShardedCache) SaveToFile(path string) error {
+func (sc *ShardedCache) SaveToFile(path string) error {
+	itemsToSave := make(map[string]*item)
+
+	for _, shard := range sc.shards {
+		shard.mu.RLock()
+		for _, elem := range shard.items {
+			it := elem.Value.(*item)
+			itemsToSave[it.Key] = it
+		}
+		shard.mu.RUnlock()
+	}
+
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := gob.NewEncoder(file)
+	if err := encoder.Encode(itemsToSave); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (s *ShardedCache) LoadFromFile(path string) error {
+func (sc *ShardedCache) LoadFromFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	decoder := gob.NewDecoder(file)
+
+	var itemsToLoad map[string]*item
+	err = decoder.Decode(&itemsToLoad)
+	if err != nil {
+		return err
+	}
+
+	for _, it := range itemsToLoad {
+		key := it.Key
+		shard := sc.getShard(key)
+		shard.mu.Lock()
+
+		elem := shard.ll.PushFront(it)
+		shard.items[key] = elem
+		
+		shard.mu.Unlock()
+	}
+
 	return nil
 }
