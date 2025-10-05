@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"gocache/cmd/server"
 	"gocache/internal/cache"
 	"log"
@@ -18,7 +19,14 @@ func main() {
 
 	log.Println("Starting GoCache server...")
 
-	c := cache.NewShardedCache(defaultShardCount, 1000, 10*time.Second)
+	port := flag.String("port", "6379", "Port to listen on")
+	shards := flag.Int("shards", defaultShardCount, "Number of shards to use")
+	maxSize := flag.Int("max-size", 10000, "Max number of items in cache (total)")
+	cleanupInterval := flag.Duration("cleanup-interval", 10*time.Second, "Interval for cleaning up expired keys")
+
+	flag.Parse()
+
+	c := cache.NewShardedCache(uint32(*shards), *maxSize, *cleanupInterval)
 
 	if err := c.LoadFromFile("dump.goc"); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -33,8 +41,8 @@ func main() {
 	}
 
 	srv := server.New(c)
-	if err := srv.Listen(":6379"); err != nil {
-		log.Fatalf("Failed to listen on port 6379: %v", err)
+	if err := srv.Listen(":" + *port); err != nil {
+		log.Fatalf("Failed to listen on port %v: %v", port, err)
 	}
 
 	go func() {
@@ -43,7 +51,7 @@ func main() {
 		}
 	}()
 
-	log.Println("Server is ready to accept connections at :6379")
+	log.Printf("Server is ready to accept connections at %v", *port)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
