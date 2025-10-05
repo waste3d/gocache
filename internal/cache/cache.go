@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	_ "hash/fnv"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -19,9 +20,12 @@ type Cache interface {
 	Delete(key string) error
 	SaveToFile(path string) error
 	LoadFromFile(path string) error
+	Info() map[string]string
 	Incr(key string) (int64, error)
 	Decr(key string) (int64, error)
 	Stop()
+	GetConfig() map[string]string
+	SetConfig(param string, value string) error
 }
 
 type cacheShard struct {
@@ -35,6 +39,7 @@ type cacheShard struct {
 type ShardedCache struct {
 	shards     []*cacheShard
 	shardCount uint32
+	maxSize    int
 }
 
 type item struct {
@@ -47,6 +52,7 @@ func NewShardedCache(shardCount uint32, totalMaxSize int, cleanupInterval time.D
 	sc := &ShardedCache{
 		shards:     make([]*cacheShard, shardCount),
 		shardCount: shardCount,
+		maxSize:    totalMaxSize,
 	}
 
 	shardMaxCount := 1
@@ -319,6 +325,67 @@ func (sc *ShardedCache) LoadFromFile(path string) error {
 		shard.items[key] = elem
 
 		shard.mu.Unlock()
+	}
+
+	return nil
+}
+
+func (sc *ShardedCache) Info() map[string]string {
+	stats := make(map[string]string)
+
+	totalKeys := 0
+
+	for _, shard := range sc.shards {
+		shard.mu.RLock()
+		totalKeys += shard.ll.Len()
+		shard.mu.RUnlock()
+	}
+
+	stats["key_count"] = strconv.Itoa(totalKeys)
+	stats["shard_count"] = strconv.Itoa(int(sc.shardCount))
+
+	return stats
+}
+
+func (sc *ShardedCache) GetConfig() map[string]string {
+	config := make(map[string]string)
+	config["max-size"] = strconv.Itoa(sc.maxSize)
+	return config
+}
+
+func (sc *ShardedCache) SetConfig(param string, value string) error {
+	switch param {
+	case "max-size":
+		maxSize, err := strconv.Atoi(value)
+		if err != nil {
+			return err
+		}
+		sc.maxSize = maxSize
+		shardMaxCount := 1
+		if maxSize > 0 {
+			shardMaxCount = maxSize / int(sc.shardCount)
+			if shardMaxCount < 1 {
+				shardMaxCount = 1
+			}
+		}
+		for _, shard := range sc.shards {
+			shard.mu.Lock()
+			shard.maxSize = shardMaxCount
+			for shard.ll.Len() > shardMaxCount {
+				lruElement := shard.ll.Back()
+				if lruElement != nil {
+					shard.ll.Remove(lruElement)
+					lruItem := lruElement.Value.(*item)
+					delete(shard.items, lruItem.Key)
+				}
+			}
+			shard.mu.Unlock()
+		}
+
+		return nil
+
+	default:
+		return errors.New("unsupported config parameter")
 	}
 
 	return nil

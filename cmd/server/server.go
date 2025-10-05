@@ -165,15 +165,61 @@ ConnectionLoop:
 		case "EXIT", "QUIT":
 			break ConnectionLoop
 
-		default:
-			fmt.Fprintf(conn, "ERROR: unknown command '%s'\n", command)
+		case "PING":
+			io.WriteString(conn, "PONG\n")
+		case "INFO":
+			if len(parts) != 1 {
+				fmt.Fprintf(conn, "ERROR: wrong number of arguments for 'INFO'\n")
+			}
+			stats := s.cache.Info()
+			var response strings.Builder
+			for k, v := range stats {
+				response.WriteString(fmt.Sprintf("%s:%s\n", k, v))
+			}
+			io.WriteString(conn, response.String())
+
+		case "CONFIG":
+			if len(parts) < 3 {
+				fmt.Fprintf(conn, "ERROR: wrong number of arguments for 'CONFIG'\n")
+				continue
+			}
+			subcommand := strings.ToUpper(parts[1])
+			switch subcommand {
+			case "GET":
+				if len(parts) != 3 {
+					fmt.Fprintf(conn, "ERROR: wrong number of arguments for 'CONFIG GET'\n")
+					continue
+				}
+				param := parts[2]
+				config := s.cache.GetConfig()
+				if value, ok := config[param]; ok {
+					fmt.Fprintf(conn, "%s:%s\n", param, value)
+				} else {
+					fmt.Fprintf(conn, "ERROR: unknown config parameter '%s'\n", param)
+				}
+			case "SET":
+				if len(parts) != 4 {
+					fmt.Fprintf(conn, "ERROR: wrong number of arguments for 'CONFIG SET'\n")
+					continue
+				}
+				param := parts[2]
+				value := parts[3]
+				if err := s.cache.SetConfig(param, value); err != nil {
+					fmt.Fprintf(conn, "ERROR: %v\n", err)
+				} else {
+					io.WriteString(conn, "OK\n")
+				}
+			default:
+				fmt.Fprintf(conn, "ERROR: unknown command '%s'\n", command)
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			log.Printf("Error reading from connection: %v", err)
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		log.Printf("Error reading from connection: %v", err)
-	}
 }
+
 func (s *Server) Stop() {
 	log.Println("Stopping server...")
 	if s.listener != nil {
